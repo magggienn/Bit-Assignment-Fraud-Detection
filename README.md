@@ -22,6 +22,7 @@ Prerequisites
 Python 3.8+
 
 To setup the virtual environment please follow these steps:
+```
 1. ### Activate the existing virtual environment
 .\fraud_detection_env\Scripts\Activate.ps1
 
@@ -34,7 +35,7 @@ python main.py
 4. ### Clean up environment
 deactivate
 Remove-Item -Recurse -Force fraud_detection_env
-
+```
 ## Usage and Description
 How to run the code? 
 ----> Everything is contained in the main.py file. Simply run this file! Be sure to follow the steps outlined in the previous section (SETUP).
