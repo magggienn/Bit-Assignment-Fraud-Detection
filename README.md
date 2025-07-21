@@ -3,7 +3,7 @@ Hi! I'm Margarita, and this is my BIT assignment on Fraud Detection. Thank you f
 
 ## File Structure
  The project's code is seperated in few folders that are somewhat self-explanatory - data (where the data files - given and saved are located), docs (where the documentation is), figures, notebooks, src (where the model, preprocessing and visualisation files are located), tests (reproducibility ensuring test), fraud_detection_env (this is the setup for the virtual environment!).
-'''
+```
 fraud-detection/
 ├── data/                    # Dataset files (original and processed)
 ├── figures/                 # Generated plots and visualizations  
@@ -16,7 +16,7 @@ fraud-detection/
 ├── fraud_detection_env/     # Virtual environment
 ├── main.py                 # Main execution script
 └── requirements.txt        # Project dependencies
-'''
+```
 ## Setup
 Prerequisites
 Python 3.8+
