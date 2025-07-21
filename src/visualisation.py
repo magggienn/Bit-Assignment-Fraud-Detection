@@ -1,3 +1,6 @@
+""" This module contains functions for visualizing model performance and SHAP values.
+It includes functions for plotting SHAP dependence plots, ROC curves, confusion matrices, and saving visualizations.
+"""
 import matplotlib.pyplot as plt
 import seaborn as sns
 import shap
@@ -8,14 +11,14 @@ def plot_shap_dependence_grid(shap_values, X_test, feature_names, output_path):
     """
     Plot dependence plots for the six most influential features on a 2x3 grid.
     """
-    # Use the current order if you've already sorted your top features,
-    # otherwise, sort by mean absolute SHAP value:
+    # check if feature_names is provided, otherwise use the top features from shap_values
     if feature_names is None:
         top_indices = np.argsort(np.abs(shap_values).mean(axis=0))[-6:]
         feature_names = X_test.columns[top_indices]
     else:
         feature_names = feature_names[:6]
 
+    # grid of SHAP dependence plots
     fig, axes = plt.subplots(2, 3, figsize=(20, 10))
     axes = axes.flatten()
     for i, feat in enumerate(feature_names):
@@ -28,13 +31,16 @@ def plot_shap_dependence_grid(shap_values, X_test, feature_names, output_path):
     plt.close(fig)
 
 def plot_roc_auc_and_confusion(y_test, y_test_pred_proba, y_test_pred, model='XGBoost'):
+    """ 
+    Plot ROC curve and confusion matrix (TP,TN,FP,FN) for the model predictions.
+    """
     # ROC Curve
     fpr, tpr, thresholds = roc_curve(y_test, y_test_pred_proba)
     roc_auc = auc(fpr, tpr)
 
     plt.figure(figsize=(12, 5))
 
-    # Plot ROC Curve
+    # plot ROC Curve
     plt.subplot(1, 2, 1)
     plt.plot(fpr, tpr, color='darkorange', lw=3, label=f'{model} ROC curve (AUC = {roc_auc:.3f})')
     plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
@@ -44,7 +50,7 @@ def plot_roc_auc_and_confusion(y_test, y_test_pred_proba, y_test_pred, model='XG
     plt.legend(loc='lower right')
     plt.grid(True)
 
-    # Confusion Matrix
+    # confusion Matrix
     plt.subplot(1, 2, 2)
     cm = confusion_matrix(y_test, y_test_pred)
     tn, fp, fn, tp = cm.ravel()
@@ -74,8 +80,9 @@ def plot_roc_auc_and_confusion(y_test, y_test_pred_proba, y_test_pred, model='XG
     
     
 def save_visualizations(final_model, X_test, y_test, y_test_pred, y_test_pred_proba, output_path):
-    """Save SHAP visualizations including summary, bar, and dependence plots for top features"""
-    
+    """
+    Save SHAP visualizations including summary, dependence and waterfall plots for the top 6 features
+    """
     true_positive_indices = [
         i for i in range(len(y_test))
         if y_test.iloc[i] == 1 and y_test_pred[i] == 1
@@ -86,20 +93,20 @@ def save_visualizations(final_model, X_test, y_test, y_test_pred, y_test_pred_pr
     explainer = shap.TreeExplainer(final_model)
     shap_values = explainer.shap_values(X_test)
     
-    # Summary plot
+    # summary plot
     plt.figure(figsize=(15, 8))
     shap.summary_plot(shap_values, X_test, show=False)
     plt.savefig(output_path / f'shap_summary.pdf', bbox_inches="tight")
     plt.close()
     
-    # Get the 6 most influential features by mean absolute SHAP value
+    # get the 6 most influential features by mean absolute SHAP value
     top_indices = np.argsort(np.abs(shap_values).mean(axis=0))[-6:]
     top_feature_names = X_test.columns[top_indices]
 
     plot_shap_dependence_grid(shap_values, X_test, top_feature_names, output_path)
     plot_roc_auc_and_confusion(y_test, y_test_pred_proba, y_test_pred)
     
-    # Waterfall plot for the same sample  - true positive
+    # waterfall plot for the same sample  - true positive
     for i in range(5): #
         tp_idx = true_positive_indices[i]
 
@@ -116,3 +123,32 @@ def save_visualizations(final_model, X_test, y_test, y_test_pred, y_test_pred_pr
         fig = ax.get_figure()
         fig.savefig(output_path / f'shap_waterfall_sample_{tp_idx}.pdf', bbox_inches="tight")
         plt.close(fig)
+
+def plot_rank_and_aggregate_features_voting(n_top=10, summary=None):
+    """ 
+    Plot the voting results for feature importance rankings. 
+    """
+    if summary is None or summary.empty:
+        raise ValueError("summary dataframe must be provided and non-empty")
+
+    # select top n_top features by votes
+    top_features = summary.head(n_top)
+
+    # normalize values per column for color scaling
+    df_norm = top_features.copy()
+    for col in df_norm.columns:
+        min_val = df_norm[col].min()
+        max_val = df_norm[col].max()
+        if max_val - min_val != 0:
+            df_norm[col] = (df_norm[col] - min_val) / (max_val - min_val)
+        else:
+            df_norm[col] = 0
+
+    # plot heatmap
+    plt.figure(figsize=(12, 6))
+    sns.heatmap(df_norm, annot=top_features.round(3), cmap='YlGnBu', cbar=True, linewidths=0.5)
+    plt.title(f"Top {n_top} Features based on Importance Voting Metrics")
+    plt.ylabel("Features")
+    plt.xlabel("Metrics")
+    plt.savefig('figures/feature_importance_voting.pdf', bbox_inches='tight')
+    plt.show()

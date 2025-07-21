@@ -1,3 +1,6 @@
+""" This module contains functions for preprocessing data, performing correlation analysis, and ranking features based on various metrics.
+It also includes functions for aggregating feature importance.
+"""
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,21 +13,19 @@ from sklearn.model_selection import GridSearchCV
 
 def preprocess_data(df):
     """
-    Preprocess the DataFrame by removing unnecessary columns and handling missing values.
+    Preprocess the DataFrame by removing unnecessary columns and handling missing values with the use of medians!
     """
     if 'EJ' in df.columns:
         df['EJ_enc'] = df['EJ'].map({'A': 0, 'B': 1})
         df.drop(columns=['EJ'], inplace=True)
     if 'Target' in df.columns:
-        # df['target_labels_enc'] = df['Target'].map({'no_fraud': 0, 'payment_fraud': 1, 'identification_fraud': 2,'malware_fraud':3})
         df['target_enc'] = df['Target'].apply(lambda x: 0 if x == 'no_fraud' else 1)
         df.drop(columns=['Target'], inplace=True)
-        # df.drop(columns=['target_labels_enc'], inplace=True)
-
-    # Drop columns that are not needed for analysis
+        
+    # drop columns that are not needed for analysis
     df = df.drop(columns=['Id'], errors='ignore')
     
-    # Fill missing values with the median for numeric columns due to their skewness
+    # fill missing values with the median for numeric columns due to their skewness
     numeric_cols = df.select_dtypes(include=['float64', 'int64']).columns
     
     for col in numeric_cols:
@@ -34,16 +35,12 @@ def preprocess_data(df):
     
     return df
 
-def correlation_analysis(df, type='pearson'):
+def correlation_analysis(df, type='spearman'):
     """
-    Perform correlation analysis on the DataFrame.
-    
-    Parameters:
-    - df: DataFrame to analyze
-    - type: Type of correlation to compute ('pearson', 'spearman', 'kendall')
-    
-    Returns:
-    - corr_matrix: Correlation matrix
+    Perform Spearman and Kendall correlation analysis on a given DataFrame.
+    Spearman and Kendall are used to measure the strength and direction of association between two ranked variables.
+    They are non-parametric and do not assume a normal distribution of the data. Additionally, they are robust to outliers
+    and can recognize monotonic relationships, which makes them suitable for non-linear relationships.
     """
     spearman_results = []
     kendall_results = []
@@ -68,7 +65,6 @@ def correlation_analysis(df, type='pearson'):
     elif type == 'kendall':
         return kendall_df
 
-#TODO: Check how it works
 def distance_correlation(x, y):
     """ Compute distance correlation between two arrays"""
     x = np.atleast_1d(x)
@@ -85,10 +81,10 @@ def distance_correlation(x, y):
 
 def rank_and_aggregate_features(df, n_top=10, run_gridsearch=False, best_rf_params_path='best_rf_params.pkl'):
     """  
-    Rank features based on different correlation metrics and aggregate results.
+    Rank features based on different correlation metrics (Spearman,Kendall,RF,Distance Correlation) and aggregate results.
     It results in voting for the most important features.
     """
-    # Prepare features and target
+    # prepare features and target
     feature_cols = [col for col in df.columns if col not in ['target_labels_enc', 'target_enc']]
     X = df[feature_cols]
     y = df['target_enc']
@@ -101,12 +97,11 @@ def rank_and_aggregate_features(df, n_top=10, run_gridsearch=False, best_rf_para
     kendall_scores = [(col, abs(kendalltau(df[col], y)[0])) for col in feature_cols]
     kendall_top = set([x[0] for x in sorted(kendall_scores, key=lambda x: x[1], reverse=True)[:n_top]])
 
-    # Distance correlation
+    # distance correlation
     distcorr_scores = [(col, abs(distance_correlation(df[col].values, y.values))) for col in feature_cols]
     distcorr_top = set([x[0] for x in sorted(distcorr_scores, key=lambda x: x[1], reverse=True)[:n_top]])
 
     # Random Forest importance with GridSearchCV
-    # Random Forest importance
     if run_gridsearch:
         print("Running GridSearchCV for Random Forest (this may take time)...")
         param_grid = {
@@ -134,8 +129,7 @@ def rank_and_aggregate_features(df, n_top=10, run_gridsearch=False, best_rf_para
     rf_scores = list(zip(feature_cols, clf.feature_importances_))
     rf_top = set([x[0] for x in sorted(rf_scores, key=lambda x: x[1], reverse=True)[:n_top]])
     
-
-    # Aggregate: count votes for each feature
+    # aggregate: count votes for each feature
     all_top_features = sorted(spearman_top.union(kendall_top, distcorr_top, rf_top))
     votes = Counter()
     for f in all_top_features:
@@ -144,7 +138,7 @@ def rank_and_aggregate_features(df, n_top=10, run_gridsearch=False, best_rf_para
         votes[f] += int(f in distcorr_top)
         votes[f] += int(f in rf_top)
 
-    # Create DataFrame summary
+    # create DataFrame summary
     summary = pd.DataFrame({
         'Votes': [votes[f] for f in all_top_features],
         'Spearman': [dict(spearman_scores).get(f, 0) for f in all_top_features],
@@ -159,31 +153,3 @@ def rank_and_aggregate_features(df, n_top=10, run_gridsearch=False, best_rf_para
     summary = summary[~summary.duplicated(keep='first')]
     summary.to_csv(f'data/feature_summary_{n_top}_per_metric.csv', index=True)
     return summary
-
-def plot_rank_and_aggregate_features_voting(n_top=10, summary=None):
-    """ Plot the voting results for feature importance rankings. """
-    if summary is None or summary.empty:
-        raise ValueError("summary dataframe must be provided and non-empty")
-
-    # Select top n_top features by votes
-    top_features = summary.head(n_top)
-
-    # Normalize values per column for better color scaling
-    df_norm = top_features.copy()
-    for col in df_norm.columns:
-        min_val = df_norm[col].min()
-        max_val = df_norm[col].max()
-        if max_val - min_val != 0:
-            df_norm[col] = (df_norm[col] - min_val) / (max_val - min_val)
-        else:
-            df_norm[col] = 0
-
-    # Plot heatmap
-    plt.figure(figsize=(12, 6))
-    sns.heatmap(df_norm, annot=top_features.round(3), cmap='YlGnBu', cbar=True, linewidths=0.5)
-    plt.title(f"Top {n_top} Features based on Importance Voting Metrics")
-    plt.ylabel("Features")
-    plt.xlabel("Metrics")
-    plt.savefig('figures/feature_importance_voting.pdf', bbox_inches='tight')
-    plt.show()
-

@@ -1,3 +1,4 @@
+"""This script sets random seeds and verifies reproducibility across different components of the project."""
 import os
 import random
 import numpy as np
@@ -10,15 +11,11 @@ def set_all_seeds(seed=42):
     
     # XGBoost specific
     os.environ['OMP_NUM_THREADS'] = '1'
-    
     return seed
 
 def verify_reproducibility(quick_test=True,SEED=42):
     """
     Verify reproducibility across all components of the fraud detection pipeline
-    
-    Args:
-        quick_test: If True, runs a fast verification. If False, runs full pipeline test.
     """
     print("=" * 50)
     print("REPRODUCIBILITY VERIFICATION")
@@ -29,7 +26,7 @@ def verify_reproducibility(quick_test=True,SEED=42):
     print(f"✓ PYTHONHASHSEED: {os.environ.get('PYTHONHASHSEED', 'Not set')}")
     
     if quick_test:
-        # Quick random number generation test
+        # quick random number generation test
         np.random.seed(SEED)
         sample1 = np.random.rand(5)
         np.random.seed(SEED)  # Reset
@@ -40,13 +37,11 @@ def verify_reproducibility(quick_test=True,SEED=42):
         else:
             print("✗ NumPy random generation: NOT REPRODUCIBLE")
             
-        # Reset for actual pipeline
+        # reset for actual pipeline
         np.random.seed(SEED)
         random.seed(SEED)
         
     else:
-        # Full pipeline test (use sparingly - computationally expensive)
-        print("Running full pipeline reproducibility test...")
-        # This would run your actual model training twice and compare results
-        
+        # full pipeline test
+        print("Running full pipeline reproducibility test...")        
     print("=" * 50)

@@ -1,17 +1,16 @@
+""" This module contains functions for training machine learning models, optimizing hyperparameters using Optuna, and evaluating model performance.
+It includes functions for training XGBoost models, evaluating them, and performing logistic regression benchmarks.
+"""
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score, classification_report
-import shap
-import optuna 
+from sklearn.metrics import roc_auc_score, classification_report 
 import xgboost as xgb
 from pathlib import Path
-import datetime
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from xgboost.callback import EarlyStopping
 
 def split_data(X,y):
     """ Split the data into train, validation, and test sets """
@@ -32,7 +31,7 @@ def compute_scale_pos_weight(y):
 def objective(trial, X_train, X_val, X_test, y_train, y_val, y_test):
     """ Optimize the data for training """
     
-    # Define the hyperparameters to optimize
+    # define the hyperparameters to optimize
     param = {
         "objective": "binary:logistic",
         "eval_metric": "auc",
@@ -44,7 +43,7 @@ def objective(trial, X_train, X_val, X_test, y_train, y_val, y_test):
          "scale_pos_weight": compute_scale_pos_weight(y_train),
         "use_label_encoder": False,
         "random_state": 42,
-        "deterministic_histogram": True,  # Ensure reproducibility
+        "deterministic_histogram": True,  # to ensure reproducibility 100%
         "tree_method": "exact"
     }
 
@@ -55,16 +54,15 @@ def objective(trial, X_train, X_val, X_test, y_train, y_val, y_test):
         eval_set=[(X_val, y_val)],
         verbose=False
     )
-
+    # predict on the validation set
     y_pred = model.predict_proba(X_val)[:, 1]
     auc = roc_auc_score(y_val, y_pred)
     return -auc 
     
-    
 def train_model(best_params, X_train, X_val, X_test, y_train, y_val):
     """ Train a model on the given data """
 
-    # Initialize the model with the best hyperparameters
+    # initialize the model with the best hyperparameters
     model = xgb.XGBClassifier(**best_params, use_label_encoder=False, objective='binary:logistic', eval_metric='auc', random_state=42)
     model.fit(pd.concat([X_train, X_val]), pd.concat([y_train, y_val]))
     y_test_pred_proba = model.predict_proba(X_test)[:, 1]
@@ -72,12 +70,14 @@ def train_model(best_params, X_train, X_val, X_test, y_train, y_val):
     return model, y_test_pred, y_test_pred_proba
 
 def evaluate_model(y_test, y_test_pred, y_test_pred_proba):
+    """ Evaluate the model performance """
     print(classification_report(y_test, y_test_pred))
     auc = roc_auc_score(y_test, y_test_pred_proba)
     print(f'Test ROC-AUC: {auc}')
     return {'roc_auc': auc}
 
 def logistic_regression_benchmark(X_train, X_test, y_train, y_test):
+    """ Train a Logistic Regression model as a benchmark """
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
@@ -88,4 +88,3 @@ def logistic_regression_benchmark(X_train, X_test, y_train, y_test):
     print(classification_report(y_test, y_pred_log))
     print("ROC-AUC:", roc_auc_score(y_test, y_pred_proba_log))
     return model, y_pred_log, y_pred_proba_log
-
