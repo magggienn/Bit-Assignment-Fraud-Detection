@@ -5,6 +5,7 @@ import seaborn as sns
 from scipy.stats import spearmanr, kendalltau
 from sklearn.ensemble import RandomForestClassifier
 from collections import Counter
+import joblib
 from sklearn.model_selection import GridSearchCV
 
 def preprocess_data(df):
@@ -15,10 +16,11 @@ def preprocess_data(df):
         df['EJ_enc'] = df['EJ'].map({'A': 0, 'B': 1})
         df.drop(columns=['EJ'], inplace=True)
     if 'Target' in df.columns:
-        df['target_labels_enc'] = df['Target'].map({'no_fraud': 0, 'payment_fraud': 1, 'identification_fraud': 2,'malware_fraud':3})
+        # df['target_labels_enc'] = df['Target'].map({'no_fraud': 0, 'payment_fraud': 1, 'identification_fraud': 2,'malware_fraud':3})
         df['target_enc'] = df['Target'].apply(lambda x: 0 if x == 'no_fraud' else 1)
         df.drop(columns=['Target'], inplace=True)
-        
+        # df.drop(columns=['target_labels_enc'], inplace=True)
+
     # Drop columns that are not needed for analysis
     df = df.drop(columns=['Id'], errors='ignore')
     
@@ -65,7 +67,8 @@ def correlation_analysis(df, type='pearson'):
         return spearman_df
     elif type == 'kendall':
         return kendall_df
-    
+
+#TODO: Check how it works
 def distance_correlation(x, y):
     """ Compute distance correlation between two arrays"""
     x = np.atleast_1d(x)
@@ -80,7 +83,11 @@ def distance_correlation(x, y):
     dvary = (B * B).sum() / (n**2)
     return 0 if dvarx == 0 or dvary == 0 else np.sqrt(dcov2) / np.sqrt(np.sqrt(dvarx * dvary))
 
-def rank_and_aggregate_features(df, n_top=10):
+def rank_and_aggregate_features(df, n_top=10, run_gridsearch=False, best_rf_params_path='best_rf_params.pkl'):
+    """  
+    Rank features based on different correlation metrics and aggregate results.
+    It results in voting for the most important features.
+    """
     # Prepare features and target
     feature_cols = [col for col in df.columns if col not in ['target_labels_enc', 'target_enc']]
     X = df[feature_cols]
@@ -98,27 +105,38 @@ def rank_and_aggregate_features(df, n_top=10):
     distcorr_scores = [(col, abs(distance_correlation(df[col].values, y.values))) for col in feature_cols]
     distcorr_top = set([x[0] for x in sorted(distcorr_scores, key=lambda x: x[1], reverse=True)[:n_top]])
 
+    # Random Forest importance with GridSearchCV
     # Random Forest importance
-    param_grid = {
-    'n_estimators': [100, 250, 500],
-    'max_depth': [None, 5, 10, 20],
-    'min_samples_split': [2, 5, 10],
-    'max_features': ['sqrt', 0.5, None],
-    'class_weight': [None, 'balanced']
-}
-    rf = RandomForestClassifier(random_state=42)
-    grid_search = GridSearchCV(rf, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
-    grid_search.fit(X, y)
+    if run_gridsearch:
+        print("Running GridSearchCV for Random Forest (this may take time)...")
+        param_grid = {
+            'n_estimators': [100, 250, 500],
+            'max_depth': [None, 5, 10, 20],
+            'min_samples_split': [2, 5, 10],
+            'max_features': ['sqrt', 0.5, None],
+            'class_weight': [None, 'balanced']
+        }
+        rf = RandomForestClassifier(random_state=42)
+        grid_search = GridSearchCV(rf, param_grid, cv=5, scoring='roc_auc', n_jobs=-1)
+        grid_search.fit(X, y)
+        rf_best_params = grid_search.best_params_
+        print("Best parameters for Random Forest:", rf_best_params)
+        joblib.dump(rf_best_params, 'data/best_rf_params.pkl')
+    else:
+        try:
+            rf_best_params = joblib.load(best_rf_params_path)
+        except FileNotFoundError:
+            print("No tuned RF params found; using defaults.")
+            rf_best_params = {'n_estimators': 100, 'random_state': 42}
 
-    best_rf = grid_search.best_estimator_
-
-    clf = RandomForestClassifier(**grid_search.best_params_, random_state=42)
+    clf = RandomForestClassifier(**rf_best_params, random_state=42)
     clf.fit(X, y)
     rf_scores = list(zip(feature_cols, clf.feature_importances_))
     rf_top = set([x[0] for x in sorted(rf_scores, key=lambda x: x[1], reverse=True)[:n_top]])
+    
 
     # Aggregate: count votes for each feature
-    all_top_features = list(spearman_top.union(kendall_top, distcorr_top, rf_top))
+    all_top_features = sorted(spearman_top.union(kendall_top, distcorr_top, rf_top))
     votes = Counter()
     for f in all_top_features:
         votes[f] += int(f in spearman_top)
@@ -134,8 +152,12 @@ def rank_and_aggregate_features(df, n_top=10):
         'DistCorr': [dict(distcorr_scores).get(f, 0) for f in all_top_features],
         'RF_Importance': [dict(rf_scores).get(f, 0) for f in all_top_features],
     }, index=all_top_features)
-    summary = summary.sort_values(by=['Votes', 'RF_Importance', 'Spearman', 'Kendall', 'DistCorr'], ascending=False)   
-    summary = summary[~summary.index.duplicated(keep='first')] 
+    summary = summary.sort_values(
+    by=['Votes', 'RF_Importance', 'Spearman', 'Kendall', 'DistCorr'], 
+    ascending=False,
+    kind='mergesort')
+    summary = summary[~summary.duplicated(keep='first')]
+    summary.to_csv(f'data/feature_summary_{n_top}_per_metric.csv', index=True)
     return summary
 
 def plot_rank_and_aggregate_features_voting(n_top=10, summary=None):
@@ -164,55 +186,4 @@ def plot_rank_and_aggregate_features_voting(n_top=10, summary=None):
     plt.xlabel("Metrics")
     plt.savefig('figures/feature_importance_voting.pdf', bbox_inches='tight')
     plt.show()
-
-def distance_correlation_analysis(df, feature_cols):
-    """ Compute distance correlation for each feature with respect to the target."""
-    results = []
-    for col in feature_cols:
-        dcorr = distance_correlation(df[col].values, df['Target_enc'].values)
-        results.append((col, dcorr))
-
-    results_sorted = sorted(results, key=lambda x: abs(x[1]), reverse=True)
-    results_sorted = pd.DataFrame(results_sorted, columns=['Feature', 'Distance Correlation']).set_index('Feature')
-    return results_sorted
-
-def random_forest_feature_importance(df, feature_cols, target_col='Target_enc'):
-    """
-    Compute feature importance using Random Forest.
-    
-    Parameters:
-    - df: DataFrame containing features and target
-    - feature_cols: List of feature column names
-    - target_col: Name of the target column
-    
-    Returns:
-    - rf_importance: DataFrame with feature importances
-    """
-    
-    X = df[feature_cols]
-    y = df[target_col]
-    
-    clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf.fit(X, y)
-    
-    rf_importance = pd.DataFrame({'Feature': feature_cols, 'Importance': clf.feature_importances_})
-    rf_importance.set_index('Feature', inplace=True)
-    
-    return rf_importance.sort_values(by='Importance', ascending=False)
-
-def plot_correlation_matrix(type='spearman', df=None):
-    plt.figure(figsize=(12, 8))
-    if type == 'spearman':
-        df['Spearman'].abs().sort_values(ascending=False).plot(kind='bar', color='orange', alpha=0.7)
-        plt.title("Absolute Spearman Correlation of Features with Fraud Target")
-        plt.ylabel("Correlation (|r|)")
-        plt.xlabel("Features")
-
-    elif type == 'kendall':
-        df['Kendall'].abs().sort_values(ascending=False).plot(kind='bar', color='steelblue', alpha=0.7)
-        plt.title("Absolute Kendall Correlation of Features with Fraud Target")
-        plt.ylabel("Correlation (|tau|)")
-        plt.xlabel("Features")
-    plt.show()
-    
 
